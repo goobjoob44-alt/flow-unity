@@ -11,7 +11,22 @@ namespace Flow
         [SerializeField] private AudioManager audioManager;
         [SerializeField] private Transform[] shards;
         [SerializeField] private Transform antenna;
-        private readonly bool[] collected = new bool[3];
+        private bool[] collected;
+        private bool countingDown;
+        private float countdown;
+        private int lastCount;
+        private int tutorialStage;
+        public RunMetrics Metrics { get; } = new RunMetrics();
+        public float Progress => Mathf.Clamp01(player.transform.position.z / ChunkGenerator.CourseLength);
+        public bool CountingDown => countingDown;
+        private static readonly float[] TutorialDistances = { 22f, 42f, 82f, 122f, 160f };
+        private static readonly string[] TutorialHints = {
+            "Gap ahead. Tap JUMP before the edge.",
+            "Low clearance. Tap SLIDE to keep your momentum.",
+            "Try the red wall or AC unit. JUMP adapts to your route.",
+            "Overhead cable. Tap JUMP beneath it to ride.",
+            "Your line now. Side rooftops hold hidden data shards."
+        };
         private int shardCount;
         private float checkpointZ;
         private float antennaWait;
@@ -31,6 +46,8 @@ namespace Flow
             Screen.autorotateToLandscapeLeft = Screen.autorotateToLandscapeRight = true;
             Screen.autorotateToPortrait = Screen.autorotateToPortraitUpsideDown = false;
             yield return RunSettings.Load();
+            collected = new bool[shards.Length];
+            player.ActionPerformed += OnAction;
             Ready = true;
             hud.ShowMenu(false, 0f, 0f);
         }
@@ -44,31 +61,71 @@ namespace Flow
             for (int i = 0; i < shards.Length; i++) { collected[i] = false; shards[i].gameObject.SetActive(true); }
             player.SetCheckpoint(new Vector3(0f, 0.1f, 3f));
             player.Recover();
-            player.Playing = true;
+            Metrics.Reset();
+            tutorialStage = 0;
+            player.Playing = false;
             HasActiveRun = true;
+            countingDown = true;
+            countdown = 3f;
+            lastCount = 3;
             replay.Begin();
             hud.ShowRun();
-            hud.Notify("Follow the striped red props. JUMP vaults. SLIDE ducks. Find your line.", 10f);
+            hud.Notify("3 / FIND YOUR LINE", 1.1f);
         }
         public void Pause()
         {
+            if (!HasActiveRun) return;
             player.Playing = false;
             Time.timeScale = 0f;
             hud.ShowPause();
         }
         public void Resume()
-        { Time.timeScale = 1f; player.Playing = true; hud.ShowRun(); }
-        private void OnApplicationPause(bool paused) { if (paused && player.Playing) Pause(); }
-        private void Update()
+        {
+            if (!HasActiveRun) return;
+            Time.timeScale = 1f;
+            player.Playing = !countingDown;
+            hud.ShowRun();
+        }
+        public void ReturnToMenu()
+        {
+            Time.timeScale = 1f;
+            player.Playing = HasActiveRun = countingDown = false;
+            replay.Hide();
+            hud.ShowMenu(false, 0f, 0f);
+        }
+        private void OnAction(ParkourState state)
         {
             if (!player.Playing) return;
+            Metrics.Record(state);
+            if (state == ParkourState.Recovery) hud.Notify("Back on your line. Keep moving.", 2f);
+        }
+        private void OnDestroy() { if (player != null) player.ActionPerformed -= OnAction; Time.timeScale = 1f; }
+        private void OnApplicationPause(bool paused) { if (paused && HasActiveRun) Pause(); }
+        private void OnApplicationFocus(bool focused) { if (!focused && HasActiveRun) Pause(); }
+        private void Update()
+        {
+            if (countingDown && Time.timeScale > 0f)
+            {
+                countdown -= Time.deltaTime;
+                int count = Mathf.CeilToInt(countdown);
+                if (count > 0 && count != lastCount) { lastCount = count; hud.Notify(count + " / FIND YOUR LINE", 1.1f); }
+                if (countdown <= 0f)
+                {
+                    countingDown = false;
+                    player.Playing = true;
+                    hud.Notify("GO / Left thumb steers. Tap JUMP at the striped fence.", 5f);
+                }
+                return;
+            }
+            if (!player.Playing) return;
             Elapsed += Time.deltaTime;
+            Metrics.Tick(Time.deltaTime, player.Momentum.Speed, player.Momentum.InFlow);
             replay.Tick(Elapsed);
             Vector3 position = player.transform.position;
-            if (position.z > checkpointZ + 40f && player.State == ParkourState.Run && position.y > -0.2f)
+            if (position.z > checkpointZ + 40f && player.Grounded && player.State == ParkourState.Run && position.y > -0.2f)
             {
                 checkpointZ = Mathf.Floor(position.z / 40f) * 40f;
-                player.SetCheckpoint(new Vector3(0f, 0.1f, checkpointZ + 3f));
+                player.SetCheckpoint(position + Vector3.up * 0.05f, player.transform.eulerAngles.y);
             }
             for (int i = 0; i < shards.Length; i++)
             {
@@ -77,6 +134,7 @@ namespace Flow
                 if ((position + Vector3.up - shards[i].position).sqrMagnitude > 3.2f) continue;
                 collected[i] = true;
                 shardCount++;
+                Metrics.CollectShard();
                 shards[i].gameObject.SetActive(false);
                 audioManager.Shard();
                 hud.Notify("DATA SHARD " + shardCount + " / 3", 2.5f);
@@ -92,7 +150,14 @@ namespace Flow
                 }
             }
             else antennaWait = 0f;
-            if (position.z >= 793f)
+            if (tutorialStage < TutorialDistances.Length && position.z >= TutorialDistances[tutorialStage])
+            {
+                hud.Notify(TutorialHints[tutorialStage], 5f);
+                tutorialStage++;
+            }
+            if (position.z >= 780f && Mathf.Abs(position.x) > 6f)
+                hud.Notify("Finish gate: return to the center rooftop.", 1f);
+            if (position.z >= 793f && Mathf.Abs(position.x) <= 6f && position.y >= -0.2f && position.y < 3.5f)
             {
                 player.Playing = false;
                 HasActiveRun = false;

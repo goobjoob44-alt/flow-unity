@@ -28,6 +28,22 @@ public static class FlowControlTests
         Require(MovementContract.ContextLock == 0.12f, "Context lock is 120ms");
         Require(MovementContract.QuickTurnDuration >= 0.25f && MovementContract.QuickTurnDuration <= 0.35f, "Quick turn timing contract");
 
+        var metrics = new RunMetrics();
+        metrics.Record(ParkourState.Run);
+        Require(metrics.Score == 0, "Running alone must not grant action points");
+        metrics.Record(ParkourState.Vault);
+        metrics.Record(ParkourState.Roll);
+        Require(metrics.Score == 300 && metrics.Combo == 2, "Chained moves must multiply action points");
+        metrics.Tick(6f, 9f, true);
+        Require(metrics.Combo == 0 && metrics.BestCombo == 2, "Expired chains must preserve best chain");
+        Require(metrics.FlowSeconds == 6f && metrics.TopSpeed == 9f, "Flow duration and peak speed must accumulate");
+        metrics.CollectShard();
+        Require(metrics.Score == 800, "Shards must grant a fixed discovery bonus");
+        metrics.Record(ParkourState.Recovery);
+        Require(metrics.Recoveries == 1 && metrics.Score == 800, "Recovery must preserve earned points");
+        metrics.Reset();
+        Require(metrics.Score == 0 && metrics.Actions == 0 && metrics.BestCombo == 0 && metrics.FlowSeconds == 0f, "Restart must clear every run metric");
+
         MovementTuning tuning = ScriptableObject.CreateInstance<MovementTuning>();
         Require(tuning.SprintSpeed / tuning.Acceleration <= 0.8f, "Default acceleration must reach cruise in 800ms");
         float apex = Mathf.Sqrt(2f * tuning.Gravity * tuning.JumpHeight) / tuning.Gravity;

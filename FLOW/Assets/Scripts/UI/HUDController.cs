@@ -27,6 +27,11 @@ namespace Flow
         private Text menuTitle;
         private Text menuDetail;
         private Image flowMeter;
+        private Image routeProgress;
+        private Text comboText;
+        private Text resultsText;
+        private Text restartButton;
+        private Rect lastSafeArea;
         private float toastUntil;
         private float nextRefresh;
         private int lastWidth;
@@ -120,6 +125,11 @@ namespace Flow
             flowMeter = bar.GetComponent<Image>(); flowMeter.raycastTarget = false;
             speedText = Label(runPanel, "", new Vector2(0.5f, 0f), new Vector2(0f, 65f), new Vector2(350f, 30f), 17);
             toast = Label(runPanel, "", new Vector2(0.5f, 0.75f), Vector2.zero, new Vector2(780f, 75f), 22);
+            comboText = Label(runPanel, "", new Vector2(0.5f, 1f), new Vector2(0f, -92f), new Vector2(430f, 35f), 18);
+            RectTransform route = At("Course progress", runPanel, new Vector2(0.5f, 1f), new Vector2(0f, -64f), new Vector2(240f, 3f));
+            Image track = route.gameObject.AddComponent<Image>(); track.color = Ink; track.raycastTarget = false;
+            routeProgress = Panel("Distance completed", route, White).GetComponent<Image>();
+            routeProgress.raycastTarget = false;
         }
         private Text Pad(string title, Vector2 anchor, System.Action action)
         {
@@ -135,7 +145,8 @@ namespace Flow
             menuDetail = Label(menuPanel, "SECTOR 7 / FIRST LINE\nTwo thumbs. No limits.", middle, new Vector2(0f, 55f), new Vector2(1000f, 85f), 23);
             Button(menuPanel, "FIND YOUR FLOW", middle, new Vector2(0f, -45f), new Vector2(330f, 65f), session.Begin, true);
             Button(menuPanel, "RUN SETTINGS", middle, new Vector2(0f, -130f), new Vector2(330f, 50f), () => { menuPanel.gameObject.SetActive(false); ShowPause(); });
-            Label(menuPanel, "Source vertical slice / Offline / No ads / No accounts", middle, new Vector2(0f, -225f), new Vector2(900f, 40f), 17);
+            resultsText = Label(menuPanel, "", middle, new Vector2(0f, -225f), new Vector2(1000f, 90f), 19);
+            Label(menuPanel, "OFFLINE  /  NO ADS  /  NO ACCOUNTS", new Vector2(0.5f, 0f), new Vector2(0f, 25f), new Vector2(700f, 30f), 14);
         }
         private void BuildPause()
         {
@@ -146,7 +157,9 @@ namespace Flow
             SettingButton("ONE-HANDED", 20f, () => RunSettings.Current.oneHanded, value => RunSettings.Current.oneHanded = value);
             SettingButton("REDUCED MOTION", -40f, () => RunSettings.Current.reducedMotion, value => RunSettings.Current.reducedMotion = value);
             SettingButton("TIME TRIAL / NEXT RUN", -100f, () => RunSettings.Current.timeTrial, value => RunSettings.Current.timeTrial = value);
-            Button(pausePanel, "CONTINUE", middle, new Vector2(0f, -185f), new Vector2(350f, 57f), () => { if (session.HasActiveRun) session.Resume(); else session.Begin(); }, true);
+            Button(pausePanel, "CONTINUE", middle, new Vector2(0f, -175f), new Vector2(350f, 57f), () => { if (session.HasActiveRun) session.Resume(); else session.Begin(); }, true);
+            restartButton = Button(pausePanel, "RESTART RUN", middle, new Vector2(-120f, -250f), new Vector2(220f, 48f), session.Begin);
+            Button(pausePanel, "MAIN MENU", middle, new Vector2(120f, -250f), new Vector2(220f, 48f), session.ReturnToMenu);
         }
         private void SettingButton(string title, float y, System.Func<bool> read, System.Action<bool> write)
         {
@@ -171,21 +184,37 @@ namespace Flow
             slidePad.anchoredPosition = new Vector2(oneHanded ? 230f : -80f, 120f);
         }
         public void ShowRun() { menuPanel.gameObject.SetActive(false); pausePanel.gameObject.SetActive(false); runPanel.gameObject.SetActive(true); RefreshSettings(); }
-        public void ShowPause() { runPanel.gameObject.SetActive(false); pausePanel.gameObject.SetActive(true); settingsRefresh?.Invoke(); }
+        public void ShowPause()
+        {
+            runPanel.gameObject.SetActive(false);
+            menuPanel.gameObject.SetActive(false);
+            pausePanel.gameObject.SetActive(true);
+            restartButton.transform.parent.gameObject.SetActive(session.HasActiveRun);
+            settingsRefresh?.Invoke();
+        }
         public void ShowMenu(bool completed, float duration, float best)
         {
             runPanel.gameObject.SetActive(false); pausePanel.gameObject.SetActive(false); menuPanel.gameObject.SetActive(true);
             menuTitle.text = completed ? "LINE COMPLETE" : "FLOW";
+            RunMetrics metrics = session.Metrics;
+            resultsText.text = completed
+                ? "SCORE " + metrics.Score + "   /   BEST CHAIN " + metrics.BestCombo + "   /   MOVES " + metrics.Actions
+                    + "\nFLOW " + metrics.FlowSeconds.ToString("F1") + "s   /   TOP SPEED " + (metrics.TopSpeed * 3.6f).ToString("F0") + " KM/H"
+                : "STEER with your left thumb. JUMP and SLIDE with your right.\nChain your moves. Explore two side routes. Collect three data shards.";
             menuDetail.text = completed ? "SECTOR 7 / " + duration.ToString("F2") + "s / DATA " + session.Shards + "/3" + (best > 0f ? "\nPERSONAL BEST " + best.ToString("F2") + "s" : "") : "SECTOR 7 / FIRST LINE\nTwo thumbs. No limits.";
         }
         public void Notify(string text, float duration) { toast.text = text; toastUntil = Time.unscaledTime + duration; }
         private void Update()
         {
-            if (lastWidth != Screen.width || lastHeight != Screen.height) UpdateSafeArea();
-            if (!player.Playing || Time.unscaledTime < nextRefresh) return;
+            if (lastWidth != Screen.width || lastHeight != Screen.height || lastSafeArea != Screen.safeArea) UpdateSafeArea();
+            if ((!player.Playing && !session.CountingDown) || Time.unscaledTime < nextRefresh) return;
             nextRefresh = Time.unscaledTime + 0.1f;
             timer.text = session.IsTimeTrial ? session.Elapsed.ToString("F2") : "";
             shardText.text = "DATA " + session.Shards + " / 3";
+            routeProgress.rectTransform.anchorMax = new Vector2(session.Progress, 1f);
+            comboText.text = session.Metrics.Combo > 1
+                ? session.Metrics.Combo + " MOVE CHAIN  /  " + session.Metrics.Score
+                : "SECTOR 7  /  " + Mathf.RoundToInt(session.Progress * 100f) + "%";
             speedText.text = player.Momentum.InFlow ? "FLOW / " + (player.Momentum.Speed * 3.6f).ToString("F0") + " KM/H" : (player.Momentum.Speed * 3.6f).ToString("F0") + " KM/H";
             flowMeter.rectTransform.anchorMax = new Vector2(player.Momentum.Normalized, 1f);
             jumpText.text = player.Context.Kind == ContextType.None ? "JUMP" : player.Context.Kind.ToString().ToUpperInvariant();
@@ -195,6 +224,7 @@ namespace Flow
         private void UpdateSafeArea()
         {
             Rect safe = Screen.safeArea;
+            lastSafeArea = safe;
             safeArea.anchorMin = safe.position / new Vector2(Screen.width, Screen.height);
             safeArea.anchorMax = (safe.position + safe.size) / new Vector2(Screen.width, Screen.height);
             lastWidth = Screen.width; lastHeight = Screen.height;

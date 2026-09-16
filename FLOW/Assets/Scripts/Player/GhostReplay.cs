@@ -57,6 +57,7 @@ namespace Flow
             { Debug.LogWarning("Ghost load skipped: " + error.Message); }
             recording.Clear(); cursor = 0; nextSample = 0f; discontinuity = exhausted = false;
             if (IsTimeTrial) Sample(0f);
+            if (best != null) ghost.SetPositionAndRotation(best.frames[0].position, best.frames[0].rotation);
             ghost.gameObject.SetActive(best != null && IsTimeTrial);
         }
         public static bool Validate(GhostRun run, string build, string tuning)
@@ -97,6 +98,7 @@ namespace Flow
             float blend = b.discontinuity ? 0f : Mathf.InverseLerp(a.time, b.time, elapsed);
             ghost.SetPositionAndRotation(Vector3.Lerp(a.position, b.position, blend), Quaternion.Slerp(a.rotation, b.rotation, blend));
         }
+        public void Hide() { ghost.gameObject.SetActive(false); }
         public void Finish(float duration)
         {
             ghost.gameObject.SetActive(false);

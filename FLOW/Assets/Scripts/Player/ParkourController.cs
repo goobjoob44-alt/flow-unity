@@ -26,6 +26,7 @@ namespace Flow
         private float turnProgress = 1f;
         private bool wasGrounded;
         public bool Playing { get; set; }
+        public bool Grounded => body != null && body.isGrounded;
         public ParkourState State { get; private set; }
         public ParkourContext Context { get; private set; }
         public MomentumSystem Momentum => momentum;
